@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -125,8 +124,7 @@ func downloadChunk(targetUrl string, offset int64, chunkSize int64, writeQueue c
 
 	reader := bufio.NewReader(resp.Body)
 	//var byteSize int
-
-	buffer := make([]byte, 1024*10)
+	buffer := make([]byte, 4096)
 	writingOffset := offset
 	for {
 		n, err := reader.Read(buffer)
@@ -134,12 +132,11 @@ func downloadChunk(targetUrl string, offset int64, chunkSize int64, writeQueue c
 			return err
 		}
 
-		fmt.Println(len(buffer[:n]), n)
 		if n == 0 {
 			break
 		}
 		//fmt.Println("Write downloaded")
-		writeQueue <- WriterInfo{Offset: writingOffset, Data: buffer[:n], ByteCount: int64(n)}
+		writeQueue <- WriterInfo{Offset: writingOffset, Data: buffer, ByteCount: int64(n)}
 		writingOffset += int64(n)
 	}
 	return nil
@@ -159,10 +156,10 @@ func regularDownloader(targetUrl string, writeQueue chan<- WriterInfo) error {
 	}
 
 	reader := bufio.NewReader(resp.Body)
-	var buffer *bytes.Buffer
+	buffer := make([]byte, 4096)
 	var offset int64 = 0
 	for {
-		n, err := io.Copy(buffer, reader)
+		n, err := reader.Read(buffer)
 		if err != nil {
 			return err
 		}
@@ -171,7 +168,7 @@ func regularDownloader(targetUrl string, writeQueue chan<- WriterInfo) error {
 			break
 		}
 
-		writeQueue <- WriterInfo{Offset: offset, Data: buffer.Bytes()}
+		writeQueue <- WriterInfo{Offset: offset, Data: buffer}
 		offset += int64(n)
 	}
 
