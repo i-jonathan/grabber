@@ -136,7 +136,7 @@ func downloadChunk(targetUrl string, offset int64, chunkSize int64, writeQueue c
 			break
 		}
 		//fmt.Println("Write downloaded")
-		writeQueue <- WriterInfo{Offset: writingOffset, Data: buffer, ByteCount: int64(n)}
+		writeQueue <- WriterInfo{Offset: writingOffset, Data: buffer[:n], ByteCount: int64(n)}
 		writingOffset += int64(n)
 	}
 	return nil
