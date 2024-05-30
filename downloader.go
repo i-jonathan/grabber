@@ -88,21 +88,28 @@ func writeToFile(writeQueue <-chan WriterInfo, wg *sync.WaitGroup) {
 	}(file)
 
 	for value := range writeQueue {
-		_, err := file.WriteAt(value.Data, value.Offset)
+		_, err := file.Seek(value.Offset, io.SeekStart)
+		if err != nil {
+			log.Println("Error when writing to file", err)
+			return
+		}
+		writer := bufio.NewWriter(file)
+		_, err = writer.Write(value.Data)
 		if err != nil {
 			fmt.Println("Error writing file: ", err)
 			return
 		}
-	}
+		if err := writer.Flush(); err != nil {
+			log.Println("Error writing file: ", err)
+			return
+		}
 
-	fmt.Println("Writer closing")
+	}
 }
 
-func downloadChunk(targetUrl string, offset int64, chunkSize int64, writeQueue chan<- WriterInfo, wg *sync.WaitGroup) error {
+func downloadChunk(targetUrl string, offset int64, chunkSize int64, wg *sync.WaitGroup) error {
 	// concurrently download parts of file
 	defer wg.Done()
-
-	client := &http.Client{}
 
 	req, err := http.NewRequest(http.MethodGet, targetUrl, nil)
 	if err != nil {
@@ -110,7 +117,7 @@ func downloadChunk(targetUrl string, offset int64, chunkSize int64, writeQueue c
 	}
 
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, offset+chunkSize-1))
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -122,22 +129,28 @@ func downloadChunk(targetUrl string, offset int64, chunkSize int64, writeQueue c
 		}
 	}(resp.Body)
 
-	reader := bufio.NewReader(resp.Body)
-	//var byteSize int
-	buffer := make([]byte, 4096)
-	writingOffset := offset
-	for {
-		n, err := reader.Read(buffer)
-		if err != nil && err != io.EOF {
-			return err
-		}
+	// testing writing to file directly
+	file, err := os.OpenFile(fileIsh.Name, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		fmt.Println("Error opening file: ", err)
+		return err
+	}
 
-		if n == 0 {
-			break
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			log.Println(err)
 		}
-		//fmt.Println("Write downloaded")
-		writeQueue <- WriterInfo{Offset: writingOffset, Data: buffer[:n], ByteCount: int64(n)}
-		writingOffset += int64(n)
+	}(file)
+
+	_, err = file.Seek(offset, io.SeekStart)
+	if err != nil {
+		fmt.Println("Error when seeking to offset", err)
+	}
+
+	_, err = io.Copy(file, resp.Body)
+	if err != nil {
+		fmt.Println("Error when writing to file", err)
 	}
 	return nil
 }
@@ -156,9 +169,9 @@ func regularDownloader(targetUrl string, writeQueue chan<- WriterInfo) error {
 	}
 
 	reader := bufio.NewReader(resp.Body)
-	buffer := make([]byte, 4096)
 	var offset int64 = 0
 	for {
+		buffer := make([]byte, 1024*1024*1024)
 		n, err := reader.Read(buffer)
 		if err != nil {
 			return err
